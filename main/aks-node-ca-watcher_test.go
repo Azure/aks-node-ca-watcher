@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -8,53 +9,34 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/afero"
 )
 
 func TestCopyOperation(t *testing.T) {
-	// setup
 	testFiles := []string{"ca1.txt", "c2.txt", "ca3.txt"}
 	testFilesForRemoval := []string{"ca1-1.txt", "ca2-2.txt", "ca3-3.txt"}
 	sourceDir := "source"
 	destDir := "dest"
-	err := os.Mkdir(sourceDir, 0755)
-	if err != nil {
-		t.Fail()
-	}
-	err = createFiles(testFiles, sourceDir)
-	if err != nil {
-		t.Fail()
-	}
-	err = os.Mkdir(destDir, 0755)
-	if err != nil {
-		t.Fail()
-	}
-	watcher := &AksNodeCAWatcher{
-		copyTimestamp: time.Now().Unix(),
-		sourceDir:     sourceDir,
-		destDir:       destDir,
-	}
 
 	t.Run("filesFromSourceShouldAppearInDestAfterCopy", func(t *testing.T) {
+		watcher := setUpWatcherForTest(sourceDir, destDir, testFiles, testFilesForRemoval)
 		watcher.tagAndCopyFiles()
 		if areFilesInDirectory(testFiles, destDir) != true {
 			t.Fail()
 		}
 	})
 	t.Run("FilesShouldBeMarkedWithTimestampAfterCopyToDest", func(t *testing.T) {
+		watcher := setUpWatcherForTest(sourceDir, destDir, testFiles, testFilesForRemoval)
 		watcher.tagAndCopyFiles()
-		tag := strconv.FormatInt(watcher.copyTimestamp, 10)
-		if areFilesInDirectoryTagged(destDir, tag) != true {
+		if areFilesInDirectoryTagged(destDir, watcher.copyTimestamp) != true {
 			t.Fail()
 		}
 	})
 	t.Run("FilesWithOlderTimestampShouldBeRemovedInDestAfterCopy", func(t *testing.T) {
-		err := createFiles(testFilesForRemoval, destDir)
-		if err != nil {
-			t.Fail()
-		}
-
+		watcher := setUpWatcherForTest(sourceDir, destDir, testFiles, testFilesForRemoval)
 		watcher.runIteration()
-		files, err := os.ReadDir(watcher.destDir)
+		files, err := fs.ReadDir(watcher.destFileSystem, watcher.destDir)
 		if err != nil {
 			t.Fail()
 		}
@@ -62,27 +44,37 @@ func TestCopyOperation(t *testing.T) {
 			t.Fail()
 		}
 	})
-
-	t.Cleanup(func() {
-		err := os.RemoveAll(sourceDir)
-		if err != nil {
-			t.Fail()
-		}
-		err = os.RemoveAll(destDir)
-		if err != nil {
-			t.Fail()
-		}
-	})
 }
 
-func createFiles(fileNames []string, dir string) error {
-	for _, fileName := range fileNames {
-		_, err := os.Create(dir + "/" + fileName)
-		if err != nil {
-			return err
-		}
+func setUpWatcherForTest(sourceDir string, destDir string, testFiles []string, testFilesForRemoval []string) *AksNodeCAWatcher {
+	sourceFs, destFs := prepareFileEnvForTesting(sourceDir, destDir, testFiles, testFilesForRemoval)
+	watcher := &AksNodeCAWatcher{
+		copyTimestamp:    strconv.FormatInt(time.Now().Unix(), 10),
+		sourceDir:        sourceDir,
+		destDir:          destDir,
+		sourceFileSystem: sourceFs,
+		destFileSystem:   destFs,
 	}
-	return nil
+	return watcher
+}
+
+func prepareFileEnvForTesting(sourceDir, destDir string, filesAtSource, filesAtDest []string) (afero.IOFS, afero.IOFS) {
+	sourceFs := prepareFS(sourceDir, filesAtSource)
+	destFs := prepareFS(destDir, filesAtDest)
+	return sourceFs, destFs
+}
+
+func prepareFS(path string, filesToCreate []string) afero.IOFS {
+	fs := afero.NewIOFS(afero.NewMemMapFs())
+	fs.MkdirAll(path, 0644)
+	createTestFilesInFs(path, fs.Fs, filesToCreate)
+	return fs
+}
+
+func createTestFilesInFs(path string, fs afero.Fs, filesToCreate []string) {
+	for _, fileName := range filesToCreate {
+		afero.WriteFile(fs, path+"/"+fileName, []byte(fileName), 0644)
+	}
 }
 
 func areFilesInDirectory(fileList []string, targetDir string) bool {
@@ -111,10 +103,9 @@ func areFilesInDirectoryTagged(targetDir, tag string) bool {
 	return true
 }
 
-func areOlderFilesDeleted(files []os.DirEntry, timestamp int64) bool {
+func areOlderFilesDeleted(files []os.DirEntry, timestamp string) bool {
 	for _, file := range files {
-		fileTimestampTag, _ := strconv.ParseInt(file.Name()[strings.LastIndex(file.Name(),
-			"-")+1:strings.Index(file.Name(), ".")], 10, 64)
+		fileTimestampTag := file.Name()[strings.LastIndex(file.Name(), "-")+1 : strings.Index(file.Name(), ".")]
 		if fileTimestampTag < timestamp {
 			return false
 		}
