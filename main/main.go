@@ -1,83 +1,103 @@
 package main
 
 import (
-	"io/fs"
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spf13/afero"
 )
 
 type AksNodeCAWatcher struct {
-	copyTimestamp    string
-	sourceDir        string
-	destDir          string
-	sourceFileSystem fs.FS
-	destFileSystem   fs.FS
+	copyTimestamp string
+	sourceDir     string
+	destDir       string
+	podFs         afero.Fs
 }
 
 func main() {
 	watcher := &AksNodeCAWatcher{
-		copyTimestamp:    strconv.FormatInt(time.Now().Unix(), 10),
-		sourceDir:        os.Getenv("TRUSTEDCASRCDIR"),
-		destDir:          os.Getenv("TRUSTEDCADESTDIR"),
-		sourceFileSystem: os.DirFS("TRUSTEDCASRCDIR"),
-		destFileSystem:   os.DirFS("TRUSTEDCADESTDIR"),
+		copyTimestamp: strconv.FormatInt(time.Now().Unix(), 10),
+		sourceDir:     os.Getenv("TRUSTEDCASRCDIR"),
+		destDir:       os.Getenv("TRUSTEDCADESTDIR"),
+		podFs:         afero.NewOsFs(),
 	}
+
 	for {
-		watcher.runIteration()
+		err := watcher.runIteration()
+		if err != nil {
+			log.Fatal(err)
+		}
 		time.Sleep(time.Minute * 5)
 	}
 }
 
-func (watcher *AksNodeCAWatcher) runIteration() {
-	watcher.removeOldFiles()
-	watcher.tagAndCopyFiles()
-}
-
-func (watcher *AksNodeCAWatcher) tagAndCopyFiles() {
-	fs.WalkDir(watcher.sourceFileSystem, watcher.sourceDir, func(path string, d fs.DirEntry, err error) error {
-		if d.IsDir() {
-			return nil
-		}
-		fileContent, err := fs.ReadFile(watcher.sourceFileSystem, watcher.sourceDir+"/"+d.Name())
-		if err != nil {
-			return err
-		}
-		// TODO how to create file in another fs?
-		os.WriteFile()
-		watcher.destFileSystem.Open()
+func (watcher *AksNodeCAWatcher) runIteration() error {
+	err := watcher.removeOldFiles()
+	if err != nil {
 		return err
-	})
-	//files, err := fs.ReadDir(watcher.sourceFileSystem, watcher.sourceDir)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//for _, file := range files {
-	//err = os.Rename(watcher.sourceDir+"/"+file.Name(), watcher.destDir+"/"+strings.TrimSuffix(filepath.Base(file.Name()),
-	//	filepath.Ext(file.Name()))+"-"+watcher.copyTimestamp+filepath.Ext(file.Name()))
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
+	}
+	return watcher.moveFiles()
 }
 
-func (watcher *AksNodeCAWatcher) shouldFileBeRemoved(fileName string) bool {
+func (watcher AksNodeCAWatcher) removeOldFiles() error {
+	oldFiles, err := afero.ReadDir(watcher.podFs, watcher.destDir)
+	if err != nil {
+		return err
+	}
+	for _, file := range oldFiles {
+		if watcher.shouldFileBeRemoved(file.Name()) {
+			err = watcher.podFs.Remove(getFilePath(watcher.destDir, file.Name()))
+			if err != nil {
+				fmt.Printf("Couldn't remove file %s, error: %s", file.Name(), err.Error())
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+func (watcher AksNodeCAWatcher) shouldFileBeRemoved(fileName string) bool {
 	fileTimestampTag := fileName[strings.LastIndex(fileName, "-")+1 : strings.Index(fileName, ".")]
 	return watcher.copyTimestamp > fileTimestampTag
 }
 
-func (watcher *AksNodeCAWatcher) removeOldFiles() {
-	oldFiles, err := fs.ReadDir(watcher.destFileSystem, ".")
+func (watcher AksNodeCAWatcher) moveFiles() error {
+	files, err := afero.ReadDir(watcher.podFs, watcher.sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	for _, file := range oldFiles {
-		if watcher.shouldFileBeRemoved(file.Name()) {
-			err = os.Remove(watcher.destDir + "/" + file.Name())
-			if err != nil {
-				log.Fatal(err)
-			}
+	for _, file := range files {
+		fileContent, err := afero.ReadFile(watcher.podFs, getFilePath(watcher.sourceDir, file.Name()))
+		if err != nil {
+			fmt.Printf("Couldn't read file %s, error: %s", file.Name(), err.Error())
+			continue
+		}
+		err = watcher.createTaggedFileInDestination(file.Name(), fileContent)
+		if err != nil {
+			fmt.Printf("Couldn't move file %s to destination, error: %s", file.Name(), err.Error())
 		}
 	}
+	return nil
+}
+
+func (watcher AksNodeCAWatcher) createTaggedFileInDestination(fileName string, fileContent []byte) error {
+	taggedFileName := createTaggedFileName(fileName, watcher.copyTimestamp)
+	return afero.WriteFile(watcher.podFs, getFilePath(watcher.destDir, taggedFileName), fileContent, 0644)
+}
+
+func getFilePath(dir, fileName string) string {
+	return fmt.Sprintf("%s/%s", dir, fileName)
+}
+
+func createTaggedFileName(fileName, tag string) string {
+	return fmt.Sprintf("%s-%s%s", getFileNameWithoutExtension(fileName), tag, filepath.Ext(fileName))
+}
+
+func getFileNameWithoutExtension(fileName string) string {
+	return strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
 }
