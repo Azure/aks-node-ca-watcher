@@ -24,7 +24,7 @@ func TestCopyOperation(t *testing.T) {
 
 		err := watcher.moveFiles()
 		if err != nil {
-			log.Fatal(err)
+			t.Fatal(err)
 		}
 
 		if areFilesInDirectory(watcher.podFs, watcher.destDir, testFilesToCreate) != true {
@@ -37,7 +37,7 @@ func TestCopyOperation(t *testing.T) {
 
 		err := watcher.moveFiles()
 		if err != nil {
-			log.Fatal(err)
+			t.Fatal(err)
 		}
 
 		if areFilesInDirectoryTagged(watcher.podFs, watcher.copyTimestamp, destDir) != true {
@@ -51,12 +51,12 @@ func TestCopyOperation(t *testing.T) {
 
 		err := watcher.runIteration()
 		if err != nil {
-			log.Fatal(err)
+			t.Fatal(err)
 		}
 
 		files, err := afero.ReadDir(watcher.podFs, watcher.destDir)
 		if err != nil {
-			log.Fatal(err)
+			t.Fatal(err)
 		}
 		if !areOlderFilesDeleted(files, watcher.copyTimestamp) {
 			t.Fail()
@@ -104,7 +104,6 @@ func areFilesInDirectoryTagged(targetFs afero.Fs, tag, targetDir string) bool {
 	files, err := afero.ReadDir(targetFs, targetDir)
 	if err != nil {
 		log.Fatal(err)
-		return false
 	}
 	for _, file := range files {
 		if !strings.Contains(file.Name(), tag) {
