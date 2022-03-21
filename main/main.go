@@ -21,13 +21,12 @@ type AksNodeCAWatcher struct {
 
 func main() {
 	watcher := &AksNodeCAWatcher{
-		copyTimestamp: strconv.FormatInt(time.Now().Unix(), 10),
-		sourceDir:     os.Getenv("TRUSTEDCASRCDIR"),
-		destDir:       os.Getenv("TRUSTEDCADESTDIR"),
-		podFs:         afero.NewOsFs(),
+		sourceDir: os.Getenv("TRUSTEDCASRCDIR"),
+		destDir:   os.Getenv("TRUSTEDCADESTDIR"),
+		podFs:     afero.NewOsFs(),
 	}
-
 	for {
+		watcher.copyTimestamp = strconv.FormatInt(time.Now().Unix(), 10)
 		err := watcher.runIteration()
 		if err != nil {
 			log.Fatal(err)
@@ -36,7 +35,7 @@ func main() {
 	}
 }
 
-func (watcher *AksNodeCAWatcher) runIteration() error {
+func (watcher AksNodeCAWatcher) runIteration() error {
 	err := watcher.removeOldFiles()
 	if err != nil {
 		return err
