@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 
 func TestCopyOperation(t *testing.T) {
 	testFilesToCreate := []string{"ca1.txt", "c2.txt", "ca3.txt"}
-	testFilesForRemoval := []string{"ca1-1.txt", "ca2-2.txt", "ca3-3.txt"}
+	testFilesForRemoval := []string{"00000000000001ca1.txt", "00000000000001ca2-2.txt", "00000000000001ca3-3.txt"}
 	sourceDir := "source"
 	destDir := "dest"
 
@@ -66,7 +65,7 @@ func TestCopyOperation(t *testing.T) {
 
 func setUpWatcherForTest(sourceDir string, destDir string) *AksNodeCAWatcher {
 	watcher := &AksNodeCAWatcher{
-		copyTimestamp: strconv.FormatInt(time.Now().Unix(), 10),
+		copyTimestamp: keepOnlyNumbersInTag(time.Now().UTC().Format(time.RFC3339)),
 		sourceDir:     sourceDir,
 		destDir:       destDir,
 		podFs:         createFileSystemForTest(sourceDir, destDir),
@@ -90,7 +89,7 @@ func createTestFilesInFs(fs afero.Fs, path string, filesToCreate []string) {
 
 func areFilesInDirectory(targetFs afero.Fs, targetDir string, fileList []string) bool {
 	for _, fileName := range fileList {
-		matches, err := afero.Glob(targetFs, targetDir+"/"+strings.TrimSuffix(filepath.Base(fileName),
+		matches, err := afero.Glob(targetFs, targetDir+"/"+"*"+strings.TrimSuffix(filepath.Base(fileName),
 			filepath.Ext(fileName))+"*")
 		if err != nil {
 			return false
@@ -115,7 +114,7 @@ func areFilesInDirectoryTagged(targetFs afero.Fs, tag, targetDir string) bool {
 
 func areOlderFilesDeleted(files []os.FileInfo, timestamp string) bool {
 	for _, file := range files {
-		fileTimestampTag := file.Name()[strings.LastIndex(file.Name(), "-")+1 : strings.Index(file.Name(), ".")]
+		fileTimestampTag := file.Name()[:TAGLENGTH]
 		if fileTimestampTag < timestamp {
 			return false
 		}

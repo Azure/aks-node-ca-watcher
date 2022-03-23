@@ -5,12 +5,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/afero"
 )
+
+const TAGLENGTH = 14
 
 type AksNodeCAWatcher struct {
 	copyTimestamp string
@@ -26,13 +28,25 @@ func main() {
 		podFs:     afero.NewOsFs(),
 	}
 	for {
-		watcher.copyTimestamp = strconv.FormatInt(time.Now().Unix(), 10)
+		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().UTC().Format(time.RFC3339))
 		err := watcher.runIteration()
 		if err != nil {
 			log.Fatal(err)
 		}
 		time.Sleep(time.Minute * 5)
 	}
+}
+
+func keepOnlyNumbersInTag(tag string) string {
+	return strings.Map(
+		func(r rune) rune {
+			if unicode.IsDigit(r) {
+				return r
+			}
+			return -1
+		},
+		tag,
+	)
 }
 
 func (watcher AksNodeCAWatcher) runIteration() error {
@@ -61,7 +75,7 @@ func (watcher AksNodeCAWatcher) removeOldFiles() error {
 }
 
 func (watcher AksNodeCAWatcher) shouldFileBeRemoved(fileName string) bool {
-	fileTimestampTag := fileName[strings.LastIndex(fileName, "-")+1 : strings.Index(fileName, ".")]
+	fileTimestampTag := fileName[:TAGLENGTH]
 	return watcher.copyTimestamp > fileTimestampTag
 }
 
@@ -94,7 +108,7 @@ func getFilePath(dir, fileName string) string {
 }
 
 func createTaggedFileName(fileName, tag string) string {
-	return fmt.Sprintf("%s-%s%s", getFileNameWithoutExtension(fileName), tag, filepath.Ext(fileName))
+	return fmt.Sprintf("%s%s%s", tag, getFileNameWithoutExtension(fileName), filepath.Ext(fileName))
 }
 
 func getFileNameWithoutExtension(fileName string) string {
