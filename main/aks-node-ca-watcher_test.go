@@ -12,27 +12,26 @@ import (
 )
 
 func TestCopyOperation(t *testing.T) {
-	testFilesToCreate := []string{"ca1.txt", "c2.txt", "ca3.txt"}
-	testFilesForRemoval := []string{"00000000000001ca1.txt", "00000000000001ca2-2.txt", "00000000000001ca3-3.txt"}
+	testFiles := []string{"ca1.txt", "c2.txt", "ca3.txt"}
 	sourceDir := "source"
 	destDir := "dest"
 
 	t.Run("filesFromSourceShouldAppearInDestAfterCopy", func(t *testing.T) {
 		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFilesToCreate)
+		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
 
 		err := watcher.moveFiles()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if areFilesInDirectory(watcher.podFs, watcher.destDir, testFilesToCreate) != true {
+		if areFilesInDirectory(watcher.podFs, watcher.destDir, testFiles) != true {
 			t.Fail()
 		}
 	})
 	t.Run("FilesShouldBeMarkedWithTimestampAfterCopyToDest", func(t *testing.T) {
 		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFilesToCreate)
+		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
 
 		err := watcher.moveFiles()
 		if err != nil {
@@ -45,8 +44,10 @@ func TestCopyOperation(t *testing.T) {
 	})
 	t.Run("FilesWithOlderTimestampShouldBeRemovedInDestAfterCopy", func(t *testing.T) {
 		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFilesToCreate)
-		createTestFilesInFs(watcher.podFs, watcher.destDir, testFilesForRemoval)
+		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
+
+		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339))
+		createAlreadyTaggedFilesForRemoval(watcher, testFiles)
 
 		err := watcher.runIteration()
 		if err != nil {
@@ -84,6 +85,12 @@ func createFileSystemForTest(pathsToCreate ...string) afero.Fs {
 func createTestFilesInFs(fs afero.Fs, path string, filesToCreate []string) {
 	for _, fileName := range filesToCreate {
 		afero.WriteFile(fs, path+"/"+fileName, []byte(fileName), 0644)
+	}
+}
+
+func createAlreadyTaggedFilesForRemoval(watcher *AksNodeCAWatcher, filesToCreate []string) {
+	for _, fileName := range filesToCreate {
+		watcher.createTaggedFileInDestination(fileName, []byte(fileName))
 	}
 }
 
