@@ -62,6 +62,26 @@ func TestCopyOperation(t *testing.T) {
 			t.Fail()
 		}
 	})
+	t.Run("FilesShouldBeDeletedFromDestWhenAllSourceFilesAreDeleted", func(t *testing.T) {
+		watcher := setUpWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
+
+		err := watcher.runIteration()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		deleteFilesInDir(watcher.podFs, watcher.sourceDir)
+		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339))
+
+		err = watcher.runIteration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !isDirEmpty(watcher.podFs, watcher.destDir) {
+			t.Fail()
+		}
+	})
 }
 
 func setUpWatcherForTest(sourceDir string, destDir string) *AksNodeCAWatcher {
@@ -127,4 +147,19 @@ func areOlderFilesDeleted(files []os.FileInfo, timestamp string) bool {
 		}
 	}
 	return true
+}
+
+func deleteFilesInDir(targetFs afero.Fs, targetDir string) {
+	files, _ := afero.ReadDir(targetFs, targetDir)
+	for _, file := range files {
+		_ = targetFs.Remove(getFilePath(targetDir, file.Name()))
+	}
+}
+
+func isDirEmpty(targetFs afero.Fs, targetDir string) bool {
+	files, err := afero.ReadDir(targetFs, targetDir)
+	if err != nil {
+		return false
+	}
+	return len(files) == 0
 }
