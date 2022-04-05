@@ -72,7 +72,7 @@ func TestCopyOperation(t *testing.T) {
 		}
 
 		deleteFilesInDir(watcher.podFs, watcher.sourceDir)
-		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339))
+		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339))
 
 		err = watcher.runIteration()
 		if err != nil {
