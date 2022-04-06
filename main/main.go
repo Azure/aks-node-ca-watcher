@@ -9,10 +9,15 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/afero"
 )
 
 const TAGLENGTH = 14
+
+type NodeWatcher interface {
+	runIteration() error
+}
 
 type AksNodeCAWatcher struct {
 	copyTimestamp string
@@ -22,19 +27,58 @@ type AksNodeCAWatcher struct {
 }
 
 func main() {
-	watcher := &AksNodeCAWatcher{
+	nodeWatcher := &AksNodeCAWatcher{
 		sourceDir: os.Getenv("TRUSTEDCASRCDIR"),
 		destDir:   os.Getenv("TRUSTEDCADESTDIR"),
 		podFs:     afero.NewOsFs(),
 	}
-	for {
-		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().UTC().Format(time.RFC3339))
-		err := watcher.runIteration()
-		if err != nil {
-			log.Fatal(err)
-		}
-		time.Sleep(time.Minute * 5)
+	fileWatcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer fileWatcher.Close()
+	exit := make(chan bool)
+	runNodeWatcher(nodeWatcher, fileWatcher, exit)
+	<-exit
+}
+
+func runNodeWatcher(nodeWatcher NodeWatcher, fileWatcher *fsnotify.Watcher, exit chan bool) {
+	go func() {
+		var (
+			timer     *time.Timer
+			lastEvent fsnotify.Event
+		)
+		timer = time.NewTimer(time.Millisecond)
+		<-timer.C
+		for {
+			select {
+			case event, ok := <-fileWatcher.Events:
+				if !ok {
+					return
+				}
+				log.Println("event:", event)
+				lastEvent = event
+				timer.Reset(time.Millisecond * 100)
+			case <-timer.C:
+				if lastEvent.Op&fsnotify.Create == fsnotify.Create || lastEvent.Op&fsnotify.Write == fsnotify.Write || lastEvent.
+					Op&fsnotify.Remove == fsnotify.Remove {
+					err := nodeWatcher.runIteration()
+					if err != nil {
+						log.Printf("Iteration failed during event %s, path %s. Error: %s", lastEvent.Op.String(),
+							lastEvent.Name,
+							err.Error())
+					}
+				}
+			case err, ok := <-fileWatcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("error:", err)
+			case <-exit:
+				return
+			}
+		}
+	}()
 }
 
 func keepOnlyNumbersInTag(tag string) string {
@@ -50,6 +94,7 @@ func keepOnlyNumbersInTag(tag string) string {
 }
 
 func (watcher AksNodeCAWatcher) runIteration() error {
+	watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().UTC().Format(time.RFC3339))
 	err := watcher.removeOldFiles()
 	if err != nil {
 		return err

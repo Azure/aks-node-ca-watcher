@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"github.com/fsnotify/fsnotify"
 	"log"
 	"os"
 	"path/filepath"
@@ -17,81 +19,178 @@ func TestCopyOperation(t *testing.T) {
 	destDir := "dest"
 
 	t.Run("filesFromSourceShouldAppearInDestAfterCopy", func(t *testing.T) {
-		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-		err := watcher.moveFiles()
+		err := nodeWatcher.moveFiles()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if areFilesInDirectory(watcher.podFs, watcher.destDir, testFiles) != true {
+		if areFilesInDirectory(nodeWatcher.podFs, nodeWatcher.destDir, testFiles) != true {
 			t.Fail()
 		}
 	})
 	t.Run("FilesShouldBeMarkedWithTimestampAfterCopyToDest", func(t *testing.T) {
-		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-		err := watcher.moveFiles()
+		err := nodeWatcher.moveFiles()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if areFilesInDirectoryTagged(watcher.podFs, watcher.copyTimestamp, destDir) != true {
+		if areFilesInDirectoryTagged(nodeWatcher.podFs, nodeWatcher.copyTimestamp, destDir) != true {
 			t.Fail()
 		}
 	})
 	t.Run("FilesWithOlderTimestampShouldBeRemovedInDestAfterCopy", func(t *testing.T) {
-		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339))
-		createAlreadyTaggedFilesForRemoval(watcher, testFiles)
+		nodeWatcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339))
+		createAlreadyTaggedFilesForRemoval(nodeWatcher, testFiles)
 
-		err := watcher.runIteration()
+		err := nodeWatcher.runIteration()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		files, err := afero.ReadDir(watcher.podFs, watcher.destDir)
+		files, err := afero.ReadDir(nodeWatcher.podFs, nodeWatcher.destDir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !areOlderFilesDeleted(files, watcher.copyTimestamp) {
+		if !areOlderFilesDeleted(files, nodeWatcher.copyTimestamp) {
 			t.Fail()
 		}
 	})
 	t.Run("FilesShouldBeDeletedFromDestWhenAllSourceFilesAreDeleted", func(t *testing.T) {
-		watcher := setUpWatcherForTest(sourceDir, destDir)
-		createTestFilesInFs(watcher.podFs, watcher.sourceDir, testFiles)
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-		err := watcher.runIteration()
+		err := nodeWatcher.runIteration()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		deleteFilesInDir(watcher.podFs, watcher.sourceDir)
-		watcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339))
+		deleteFilesInDir(nodeWatcher.podFs, nodeWatcher.sourceDir)
+		nodeWatcher.copyTimestamp = keepOnlyNumbersInTag(time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339))
 
-		err = watcher.runIteration()
+		err = nodeWatcher.runIteration()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !isDirEmpty(watcher.podFs, watcher.destDir) {
+		if !isDirEmpty(nodeWatcher.podFs, nodeWatcher.destDir) {
 			t.Fail()
 		}
 	})
 }
 
-func setUpWatcherForTest(sourceDir string, destDir string) *AksNodeCAWatcher {
-	watcher := &AksNodeCAWatcher{
+type mockNodeWatcher struct {
+	called bool
+}
+
+func (n *mockNodeWatcher) runIteration() error {
+	n.called = true
+	return nil
+}
+
+func TestFileWatching(t *testing.T) {
+	t.Run("programIterationShouldRunWhenFileIsAddedInSource", func(t *testing.T) {
+		nodeWatcher := &mockNodeWatcher{}
+		setUpDirsForWatchTests()
+		fileWatcher := setUpFileWatcherForTest("source")
+		exit := make(chan bool)
+		runNodeWatcher(nodeWatcher, fileWatcher, exit)
+
+		addFileForWatchTest("source")
+		time.Sleep(time.Second * 5)
+		exit <- true
+
+		if !nodeWatcher.called {
+			t.Fail()
+		}
+	})
+	t.Run("programIterationShouldRunWhenFileIsDeletedInSource", func(t *testing.T) {
+		nodeWatcher := &mockNodeWatcher{}
+		setUpDirsForWatchTests()
+		fileWatcher := setUpFileWatcherForTest("source")
+		addFileForWatchTest("source")
+		exit := make(chan bool)
+		runNodeWatcher(nodeWatcher, fileWatcher, exit)
+
+		removeFileForWatchTest("source/testFile")
+		time.Sleep(time.Second * 5)
+		exit <- true
+
+		if !nodeWatcher.called {
+			t.Fail()
+		}
+	})
+	t.Run("programIterationShouldRunWhenFileIsModifiedInSource", func(t *testing.T) {
+		nodeWatcher := &mockNodeWatcher{}
+		setUpDirsForWatchTests()
+		fileWatcher := setUpFileWatcherForTest("source")
+		addFileForWatchTest("source")
+		exit := make(chan bool)
+		runNodeWatcher(nodeWatcher, fileWatcher, exit)
+
+		modifyFileForWatchTest("source/testFile")
+		time.Sleep(time.Second * 5)
+		exit <- true
+
+		if !nodeWatcher.called {
+			t.Fail()
+		}
+	})
+	t.Cleanup(func() {
+		_ = os.RemoveAll("source")
+	})
+}
+
+func removeFileForWatchTest(path string) {
+	err := os.Remove(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func modifyFileForWatchTest(fileName string) {
+	_ = os.WriteFile(fileName, []byte("new content"), 0644)
+}
+
+func addFileForWatchTest(targetDir string) {
+	fileName := "testFile"
+	err := os.WriteFile(fmt.Sprintf("%s/%s", targetDir, fileName), []byte("Test file content"), 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func setUpDirsForWatchTests() {
+	err := os.Mkdir("source", 0777)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func setUpNodeWatcherForTest(sourceDir string, destDir string) *AksNodeCAWatcher {
+	nodeWatcher := &AksNodeCAWatcher{
 		copyTimestamp: keepOnlyNumbersInTag(time.Now().UTC().Format(time.RFC3339)),
 		sourceDir:     sourceDir,
 		destDir:       destDir,
 		podFs:         createFileSystemForTest(sourceDir, destDir),
 	}
-	return watcher
+	return nodeWatcher
+}
+
+func setUpFileWatcherForTest(dirToWatch string) *fsnotify.Watcher {
+	fileWatcher, _ := fsnotify.NewWatcher()
+	err := fileWatcher.Add(dirToWatch)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return fileWatcher
 }
 
 func createFileSystemForTest(pathsToCreate ...string) afero.Fs {
