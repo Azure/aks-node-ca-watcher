@@ -56,12 +56,9 @@ func runNodeWatcher(watcher *AksNodeCAWatcher, done chan bool) {
 
 func (watcher *AksNodeCAWatcher) shouldIterationRun() bool {
 	// TODO - how to handle case when we are unable to read src/dest dirs?
-	srcCertFiles, wereFilesRead := tryReadingCertFiles(watcher.podFs, watcher.sourceDir)
-	if !wereFilesRead {
-		return false
-	}
-	destCertFiles, wereFilesRead := tryReadingCertFiles(watcher.podFs, watcher.destDir)
-	if !wereFilesRead {
+	srcCertFiles, wereSrcFilesRead := tryReadingCertFiles(watcher.podFs, watcher.sourceDir)
+	destCertFiles, wereDestFilesRead := tryReadingCertFiles(watcher.podFs, watcher.destDir)
+	if !wereSrcFilesRead || !wereDestFilesRead {
 		return false
 	}
 	if wasSrcUpdated(srcCertFiles, destCertFiles) {
