@@ -7,7 +7,7 @@ certDestination=/usr/local/share/ca-certificates/certs
 
 cp -a "$certSource"/. "$certDestination"
 
-if [[ -z "$certSource" ]]; then
+if [[ -z $(ls -A "$certSource") ]]; then
   ls "$certDestination" | grep -E '^[0-9]{14}' | while read -r line; do
     rm $certDestination/"$line"
   done

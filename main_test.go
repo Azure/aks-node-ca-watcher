@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"github.com/fsnotify/fsnotify"
 	"log"
 	"os"
 	"path/filepath"
@@ -86,92 +84,82 @@ func TestCopyOperation(t *testing.T) {
 	})
 }
 
-type mockNodeWatcher struct {
-	called bool
-}
+func TestShouldIterationRun(t *testing.T) {
+	testFiles := []string{"ca1.txt", "c2.txt", "ca3.txt"}
+	sourceDir := "source"
+	destDir := "dest"
 
-func (n *mockNodeWatcher) runIteration() error {
-	n.called = true
-	return nil
-}
+	t.Run("shouldReturnTrueIfSrcDirIsNotEmptyAndDestDirIsEmpty", func(t *testing.T) {
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-func TestFileWatching(t *testing.T) {
-	t.Run("programIterationShouldRunWhenFileIsAddedInSource", func(t *testing.T) {
-		nodeWatcher := &mockNodeWatcher{}
-		setUpDirsForWatchTests()
-		fileWatcher := setUpFileWatcherForTest("source")
-		exit := make(chan bool)
-		runNodeWatcher(nodeWatcher, fileWatcher, exit)
-
-		addFileForWatchTest("source")
-		time.Sleep(time.Second * 5)
-		exit <- true
-
-		if !nodeWatcher.called {
+		if !nodeWatcher.shouldIterationRun() {
 			t.Fail()
 		}
 	})
-	t.Run("programIterationShouldRunWhenFileIsDeletedInSource", func(t *testing.T) {
-		nodeWatcher := &mockNodeWatcher{}
-		setUpDirsForWatchTests()
-		fileWatcher := setUpFileWatcherForTest("source")
-		addFileForWatchTest("source")
-		exit := make(chan bool)
-		runNodeWatcher(nodeWatcher, fileWatcher, exit)
+	t.Run("shouldReturnTrueIfSrcDirIsEmptyAndDestDirIsNotEmpty", func(t *testing.T) {
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-		removeFileForWatchTest("source/testFile")
-		time.Sleep(time.Second * 5)
-		exit <- true
+		err := nodeWatcher.moveFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		if !nodeWatcher.called {
+		deleteFilesInDir(nodeWatcher.podFs, sourceDir)
+
+		if !nodeWatcher.shouldIterationRun() {
 			t.Fail()
 		}
 	})
-	t.Run("programIterationShouldRunWhenFileIsModifiedInSource", func(t *testing.T) {
-		nodeWatcher := &mockNodeWatcher{}
-		setUpDirsForWatchTests()
-		fileWatcher := setUpFileWatcherForTest("source")
-		addFileForWatchTest("source")
-		exit := make(chan bool)
-		runNodeWatcher(nodeWatcher, fileWatcher, exit)
+	t.Run("shouldReturnFalseIfSrcDirHasExactSameFilesAsDestDir", func(t *testing.T) {
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
 
-		modifyFileForWatchTest("source/testFile")
-		time.Sleep(time.Second * 5)
-		exit <- true
+		err := nodeWatcher.moveFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		if !nodeWatcher.called {
+		if nodeWatcher.shouldIterationRun() {
 			t.Fail()
 		}
 	})
-	t.Cleanup(func() {
-		_ = os.RemoveAll("source")
+	t.Run("shouldReturnTrueIfSrcDirHasDifferentFilesThanDestDir", func(t *testing.T) {
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
+
+		err := nodeWatcher.moveFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		deleteFilesInDir(nodeWatcher.podFs, sourceDir)
+		newFilesForSource := []string{"ca1-modified.txt", "c2-modified.txt", "ca3-modified.txt"}
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, newFilesForSource)
+
+		if !nodeWatcher.shouldIterationRun() {
+			t.Fail()
+		}
+	})
+	t.Run("shouldReturnTrueIfContentOfFileInSrcDirChanged", func(t *testing.T) {
+		nodeWatcher := setUpNodeWatcherForTest(sourceDir, destDir)
+		createTestFilesInFs(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles)
+
+		err := nodeWatcher.moveFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
+		modifyFileContent(nodeWatcher.podFs, nodeWatcher.sourceDir, testFiles[0])
+
+		if !nodeWatcher.shouldIterationRun() {
+			t.Fail()
+		}
 	})
 }
 
-func removeFileForWatchTest(path string) {
-	err := os.Remove(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func modifyFileForWatchTest(fileName string) {
-	_ = os.WriteFile(fileName, []byte("new content"), 0644)
-}
-
-func addFileForWatchTest(targetDir string) {
-	fileName := "testFile"
-	err := os.WriteFile(fmt.Sprintf("%s/%s", targetDir, fileName), []byte("Test file content"), 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func setUpDirsForWatchTests() {
-	err := os.Mkdir("source", 0777)
-	if err != nil {
-		log.Fatal(err)
-	}
+func modifyFileContent(fs afero.Fs, dir string, fileName string) {
+	afero.WriteFile(fs, dir+"/"+fileName, []byte("new modified content"), 0644)
 }
 
 func setUpNodeWatcherForTest(sourceDir string, destDir string) *AksNodeCAWatcher {
@@ -182,15 +170,6 @@ func setUpNodeWatcherForTest(sourceDir string, destDir string) *AksNodeCAWatcher
 		podFs:         createFileSystemForTest(sourceDir, destDir),
 	}
 	return nodeWatcher
-}
-
-func setUpFileWatcherForTest(dirToWatch string) *fsnotify.Watcher {
-	fileWatcher, _ := fsnotify.NewWatcher()
-	err := fileWatcher.Add(dirToWatch)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return fileWatcher
 }
 
 func createFileSystemForTest(pathsToCreate ...string) afero.Fs {

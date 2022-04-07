@@ -2,6 +2,12 @@
 set -euo pipefail
 set -x
 
+clean_up() {
+  kind delete cluster
+}
+
+trap clean_up EXIT ERR
+
 poll_container() {
   n=0; until ((n >= $2)); do $1 && break; n=$((n + 1)); sleep 5; done; ((n < $2))
 }
@@ -119,16 +125,9 @@ check_if_no_tagged_files_in_trusted_ca() {
   if [[ $(ls /etc/ssl/certs | grep -cE '^[0-9]{14}') != 0 ]]; then
      echo "Cert files not removed from /etc/ssl/certs (Trusted CA) after secret was removed" >&2
      exit 1
+  fi
 EOF
 }
-
-
-
-#clean_up() {
-#  kind delete cluster
-#}
-
-# trap clean_up ERR
 
 # 1. Create kind cluster
 kind create cluster
@@ -137,16 +136,16 @@ poll_container "kubectl -n default get serviceaccount default -o name" 60
 containerName=$(docker ps -q | head -n 1)
 
 # 2. Build docker image
-# TODO
+docker build .. -t aks-node-ca-watcher:latest
 
 # 3. Load image to kind cluster
 kind load docker-image aks-node-ca-watcher
 
 # 4. Setup systemd unit and timer
-docker cp scripts/. "${containerName}":/opt/scripts/
+docker cp . "${containerName}":/opt/scripts/
 
 # 5. Run daemonset with aks-node-ca-watcher and run services
-kubectl apply -f trustedCADS.yaml
+kubectl apply -f ../manifests/trustedCADS.yaml
 
 # 6. Start systemd timer/service
 docker exec "${containerName}" chmod -R +x /opt/scripts
@@ -180,7 +179,7 @@ poll_container check_if_first_cert_added_to_trusted_ca 60
 
 # 8. Change secret with certs - remove old one, add two new ones
 kubectl delete secret trustedcasecret
-kubectl apply -f updatedCerts.yaml
+kubectl apply -f ../manifests/updatedCerts.yaml
 
 # 9. Assert that old file is removed and new ones are added correctly
 # check if new file appeared in /opt/certs
@@ -202,9 +201,12 @@ check_if_first_cert_removed_from_trusted_ca
 
 # 10. Remove secret and check if all files are removed from node
 kubectl delete secret trustedcasecret
+kubectl apply -f ../manifests/emptySecret.yaml
 
 poll_container check_if_source_dir_empty 30
 
 poll_container check_if_dest_dir_empty 30
 
 poll_container check_if_no_tagged_files_in_trusted_ca 30
+
+exit 0
