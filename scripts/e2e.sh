@@ -178,7 +178,7 @@ poll_container check_if_first_cert_copied_to_dest 60
 poll_container check_if_first_cert_added_to_trusted_ca 60
 
 # 8. Change secret with certs - remove old one, add two new ones
-kubectl delete secret trustedcasecret
+# kubectl delete secret trustedcasecret
 kubectl apply -f ../manifests/updatedCerts.yaml
 
 # 9. Assert that old file is removed and new ones are added correctly
@@ -200,7 +200,7 @@ poll_container check_if_new_certs_added_to_trusted_ca 60
 check_if_first_cert_removed_from_trusted_ca
 
 # 10. Remove secret and check if all files are removed from node
-kubectl delete secret trustedcasecret
+# kubectl delete secret trustedcasecret
 kubectl apply -f ../manifests/emptySecret.yaml
 
 poll_container check_if_source_dir_empty 30
