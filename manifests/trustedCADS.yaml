@@ -1,0 +1,56 @@
+# daemonset that creates the pod which will be adding/updating certificates
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: &name proxy-certs
+  labels:
+    app: *name
+spec:
+  selector:
+    matchLabels:
+      app: *name
+  template:
+    metadata:
+      labels:
+        app: *name
+    spec:
+      containers:
+        - image: aks-node-ca-watcher:latest
+          imagePullPolicy: IfNotPresent
+          name: *name
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
+          volumeMounts:
+            - name: certs
+              mountPath: "/opt/certs"
+            - name: hostmount
+              mountPath: "/mnt/host"
+          env:
+            - name: TRUSTEDCASRCDIR
+              value: "opt/certs"
+            - name: TRUSTEDCADESTDIR
+              value: "mnt/host"
+      volumes:
+        - name: certs
+          secret:
+            secretName: trustedcasecret
+        - name: hostmount
+          hostPath:
+            path: /opt/certs
+            type: DirectoryOrCreate
+---
+# User secret with a certificate
+apiVersion: v1
+kind: Secret
+metadata:
+  name: trustedcasecret
+type: Opaque
+data:
+  ca.crt: |
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCiAgICBNSUlGV2pDQ0EwS2dBd0lCQWdJVWNCNlNmdTZWS2hZdTlKWmEzcmVWMHd3YmZmb3dEUVlKS29aSWh2Y05BUUVMCiAgICBCUUF3TERFcU1DZ0dBMVVFQXd3aFlXdHpMVzV2WkdWd2IyOXNNUzB4TVRNeU56TTNNeTEyYlhOek1EQXdNREF4CiAgICBNQjRYRFRJeU1ETXdPREU1TkRFeE9Wb1hEVE15TURNd05URTVOREV4T1Zvd0xERXFNQ2dHQTFVRUF3d2hZV3R6CiAgICBMVzV2WkdWd2IyOXNNUzB4TVRNeU56TTNNeTEyYlhOek1EQXdNREF4TUlJQ0lqQU5CZ2txaGtpRzl3MEJBUUVGCiAgICBBQU9DQWc4QU1JSUNDZ0tDQWdFQXFTV0taV2dTVWxFT3h3VkMrTS80eGtSYTVCbjFvTzdSaXB5Z0NMdmZjcHRqCiAgICAvTzgxQS9EaXdFbjZGS0E3cUpzdFdxZVBJT0ozUjFxNnFuaEoyVDdrTmpiR3A1enVaSDBsNks1RzNQVG91bklsCiAgICBtanh2RzB0UWp1eDhFTW9XSm1VZmVHMmdaUjcvR2NoWWFObFUydVF1Ri90aHM4dldBRlppM3Y5QzJTeFAzdnJoCiAgICB0TmRjKzRBY3JZeUQ1NDRMbFVEb0l4OUVGYUdhb0p0cmRSUUdvQzVyNC9HTzRJUlpsTDdMMEFuQ1dhWEdERythCiAgICBYcE9LOTM5b2pFSmdNam1xZHMwT3FTcGRtY055VW16dGh5Uy9LTmRsS1hCMEFTMVZadWpjckJ3b3kyTHNUc2RtCiAgICBGWVVycytDdVBJNlZUdW43c3NYcHVzOXZUUXFZOTRCbW45c1VET3RUMzBVbHh5ZjVjQkpuNkY5ajNFVUFSQWlKCiAgICBtZXFHS2t6d2s2a2p6dFNNWVB2NEVkU3BXSnB6b29aSzhleHpuaVlOT2E2SGlpeFJMam5oOExwNm9UQmVsdzl5CiAgICBPamx2cWhjejk0cXh1SDhnK2FtYjRZeG9rZnJXTUhhc2ZKemg5K0pvQUxFR01ETE4xSlI2RlBhWDlTeUlyaXNDCiAgICBxeENKR0xWWUxTdFJyU051VjFZVEUrRHlYLzBEN01QTkliMzE5c0E5eXFRYmY3ZGNFN2RMVnpQeTlEVHZjcnhqCiAgICAyUFp5OEpRUjRIL1pWS0RBUlgrL2pybk1IT3QxckJ2VC9adnM5cDFJMmxucUJ2UTBTWG1UOS9uNmRHQXhOWHJLCiAgICBmaUkza3JSNHlqMkV0MExDdVM0VnRxZ3BTREJOVmE4TGtHNnZUS1NNMUx1ZXdjQ2pzNWtLTksxV0FQVmpLdldVQwogICAgQXdFQUFhTjBNSEl3TEFZRFZSMFJCQ1V3STRJaFlXdHpMVzV2WkdWd2IyOXNNUzB4TVRNeU56TTNNeTEyYlhOegogICAgTURBd01EQXhNQklHQTFVZEV3RUIvd1FJTUFZQkFmOENBUUF3RHdZRFZSMFBBUUgvQkFVREF3Zm5nREFkQmdOVgogICAgSFNVRUZqQVVCZ2dyQmdFRkJRY0RBZ1lJS3dZQkJRVUhBd0V3RFFZSktvWklodmNOQVFFTEJRQURnZ0lCQUkzOQogICAgMm5jNG5aY1oxYThkUGpQVW9XanFHTG53a2NJSmJGL1VnOGhCcUZDV1hyTUVINDY0OFB2VG0yS3k0eHpoUnczWgogICAgUGJHNzU4MXp4dVJJbGZVdGdjb3hXQ2ZLUjNMWXpNaVp6QXdCMFJvWXkvQnQ4V0dYME1zaEF3dzM4NlZwMVl2bQogICAgbW1ZNmxTaDBtVXBKNElaNjJkTVYwSjBjUVBZc3cxaDMxNjJMYjlPMFBBaFlkU0l1M0dKTE9GZEwrbzFwVjQ0dAogICAgY21kZnJhSlZ0MENoNGdGa1d0RGR3MUZjUkJ6cWtZSktYZ2xTVlRkUTBMLzBqRjdybHZpVDJVLzlNS1FEbkVOZwogICAgVmNuaFNjSzAyVjluMUdIWktvdU4rYjhFKzZwU2dKcHIvc3ovYjZhRzZWdi9xNzRzc0gvR3hvN0NCMkxEWElHWQogICAgQW84UEZzN2pMa3Y1MUxLUDc5dkJKa21DenBGeEtJWmxLd0VMeDZkVTUrNkxRWW1JbTBvbytyUkxrUlZ5ak5BcAogICAgK3hBOGhFZmc0ZS9tcmlLanQ2RkpmWHFCQTJ6ZkZ2RmJQL2U0ZkVTM0hCcFZXYXgyOFB1clYrdlVnN3JDbGx3MwogICAgRURxRm90NWhJYS9zaWZTZjRzcmxKVGlBM0Q2eWw4MS9Ld1VDVWdTNDRLZ3EyMW5zVVF4eW8vcFVPTnYxYTU2cAogICAgemZRYUpwenNubEEzWHdFZFdWeHlKc0NhK3MwbUhWOGZGckJhN3pyaXRwazcyVk9sQkRlNDBQWUJOcW9lVERFWQogICAgVTZobXdoc2d2Q2tDczdBZ0NLb1A0N09BSWUxN1l4dTAwNUxwQUdJTW5PS1pTVVRUSVdlZ0tTTmFGRnZvVTA5cQogICAgblI0LzR0NHd2MHRVSm1kbm82NjFaanhuNzRQRG5Yd1ZyVEE0MGlYTQogICAgLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+---
